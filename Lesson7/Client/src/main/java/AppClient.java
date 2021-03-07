@@ -1,5 +1,7 @@
+import javax.swing.*;
+
 public class AppClient {
     public static void main(String[] args) {
-        new Client();
+        SwingUtilities.invokeLater(ClientUI::new);
     }
 }

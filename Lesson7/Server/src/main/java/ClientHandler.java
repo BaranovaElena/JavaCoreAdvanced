@@ -10,8 +10,7 @@ public class ClientHandler {
     private DataOutputStream out;
     private Server server;
 
-    public ClientHandler(Integer numID, Server server, Socket socket) {
-        name = "Client"+numID;
+    public ClientHandler(Server server, Socket socket) {
         this.socket = socket;
         this.server = server;
 
@@ -19,26 +18,50 @@ public class ClientHandler {
             in = new DataInputStream(socket.getInputStream());
             out = new DataOutputStream(socket.getOutputStream());
             new Thread(() -> {
-                server.subscribe(this);
+                boolean continueChat = true;
                 try {
-                    while (true) {
+                    long start = System.currentTimeMillis();
+                    while (continueChat) { // цикл авторизации
+                        //при прошествии 120с отключаемся
+                        if ((System.currentTimeMillis() - start) > 120000) {
+                            continueChat = false;
+                            sendMessage("/error timeout");
+                        }
+                        //чтобы не застрять на readUTF, заходим туда только если появилось сообщение в буфере
+                        //те пока нет данных в буфере, крутим в цикле только условие про 120с
+                        else if (in.available() > 0)
+                        {
+                            String message = in.readUTF();
+                            if (message.startsWith("/auth")) {
+                                String[] tokens = message.split(" ");
+                                name = server.getAuthService().getNicknameByLoginAndPassword(tokens[1], tokens[2]);
+                                if (name != null) {
+                                    sendMessage("/authok");
+                                    server.subscribe(this);
+                                    System.out.println(name + " is connected!");
+                                    break;
+                                } else {
+                                    sendMessage("/error"); //тут можно еще текст ошибки писать, а на клиенте его ловить и печатать.
+                                }
+                            } else if (message.equalsIgnoreCase("/end")) {
+                                continueChat = false;
+                            }
+                        }
+                    }
+                    while (continueChat) {
                         String message = in.readUTF();
                         if (message.equalsIgnoreCase("/end")) {
                             sendMessage("/end");    //чтобы закрыть поток клиента
-                            break;
-                        }
-                        if (message.startsWith("/w")) {
-                            //отрезаем /w, делим на имя получателя и сообщение
-                            String[] msgParts = message.substring(3).split(" ",2);
-                            server.sendPrivateMessage(name, msgParts[0], name+": "+msgParts[1]);
-                        }
-                        else
-                            server.broadcastMessage(name+": "+message);
+                            continueChat = false;
+                        } else if (message.startsWith("/w")) {
+                            String[] msgParts = message.substring(3).split(" ", 2);
+                            server.sendPrivateMessage(name, msgParts[0], name + ": " + msgParts[1]);
+                        } else
+                            server.broadcastMessage(name + ": " + message);
                     }
                 } catch (IOException e) {
                     e.printStackTrace();
-                }
-                finally {
+                } finally {
                     disconnectClient();
                 }
             }).start();
@@ -64,7 +87,8 @@ public class ClientHandler {
         } catch (IOException e) {
             e.printStackTrace();
         }
-        System.out.println(name+" is disconnected!");
+        if (name != null)
+            System.out.println(name + " is disconnected!");
     }
 
     public String getName() {
